@@ -74,8 +74,8 @@ flowchart TD
 |---------|------|------|
 | **Producer** | 메시지 전송, 파티셔닝 | key 기반 라우팅 (hash(key) % N) |
 | **Broker** | 메시지 수신/저장/서빙 | WAL 기반 영속성, Consumer 요청 응답 |
-| **Consumer** | 메시지 Pull, 오프셋 관리 | Long Polling, 컨슈머 그룹 지원 |
-| **Coordinator (MVP 단순화)** | Consumer Group 및 할당 상태 유지 | 인메모리 구현, Heartbeat로 리밸런싱 감지 |
+| **Consumer** | 메시지 Pull, 오프셋 관리 | Long Polling, 컨슈머 그룹 지원. MVP에서는 `offset` 파라미터를 통해 소비 시작 위치를 명시하거나, 브로커에 저장된 (인메모리) 오프셋을 사용. |
+| **Coordinator (MVP 단순화)** | Consumer Group 및 할당 상태 유지 | 인메모리 구현으로 브로커 재시작 시 오프셋 정보 유실 가능. Heartbeat로 리밸런싱 감지. |
 | **WAL** | 메시지 복구용 로그 | offset, checksum 포함 |
 | **Replication** | 리더→팔로워 비동기 복제 | 리더 기준 최신 메시지 전달 |
 
