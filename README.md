@@ -237,7 +237,7 @@ function response(status, headers, body)
 end
 
 function done(summary, latency, requests)
-    print("Throughput: " .. (requests.duration / 1000000) .. " requests/sec")
+    print("Throughput: " .. string.format("%.2f", summary.requests / (summary.duration / 1000000)) .. " requests/sec")
     print("Average latency: " .. latency.mean / 1000 .. "ms")
 end
 ```
