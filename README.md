@@ -387,10 +387,7 @@ gafka/
 - [ ] 크로스 데이터센터 복제
 - [ ] 파티션 자동 분할
 ### Phase 4 - 운영 기능
-- [ ] Prometheus 기반 모니터링
-- [ ] TLS, 인증 등 보안 기능
-- [ ] Docker 컨테이너 배포
-- [ ] Kubernetes 매니페스트
+### Phase 4 - 운영 기능
 - [ ] Prometheus 기반 모니터링
 - [ ] TLS, 인증 등 보안 기능
 - [ ] Docker 컨테이너 배포
