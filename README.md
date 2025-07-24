@@ -20,9 +20,9 @@
 
 | 항목               | 목표 수치                       | 테스트 조건                     |
 |-------------------|----------------------------|-----------------------------|
-| **처리량 (Throughput)** | ≥ 10,000 msg/s (1KB 메시지 기준) | 단일 브로커 + 2파티션              |
-| **지연시간 (Latency)**   | 평균 ≤ 50ms, P95 ≤ 100ms      | E2E 측정 (Producer→Consumer) |
-| **내구성**              | 메시지 99% 이상 보존               | WAL 기반 복구 테스트              |
+| **처리량 (Throughput)** | ≥ 5,000 msg/s (1KB 메시지 기준) | 단일 브로커 + 2파티션 (HTTP/JSON 한계 고려) |
+| **지연시간 (Latency)**   | 평균 ≤ 100ms, P95 ≤ 200ms      | E2E 측정 (Producer→Consumer) |
+| **내구성**              | 승인된 메시지 100% 복구 보장               | WAL 기반 완전 복구 테스트              |
 | **장애 복구 시간**         | ≤ 30초 (수동 복구 포함)            | 브로커 강제 종료 후 복구 시나리오        |
 | **순서 보장**            | 파티션 내 100% 순서 보장            | 메시지 순서 테스트                 |
 
@@ -40,12 +40,12 @@
 - [x] **리더-팔로워 복제**: 데이터 이중화 (단순 구현)
 - [x] **Heartbeat & 파티션 할당 유지**: Consumer 생존 확인
 
-### ✔️ 비기능 요구사항
-- [x] **고성능 처리**: 10K msg/s 이상
-- [x] **평균 지연시간**: 50ms 이하
+| **비기능 요구사항** |
+- [x] **고성능 처리**: 5K msg/s 이상 (HTTP/JSON 제약 고려)
+- [x] **평균 지연시간**: 100ms 이하
 - [x] **장애 복구**: 시나리오 기반 복구 매뉴얼
 - [x] **테스트 기반 개발**: TDD 적용
-- [x] **확장 가능 아키텍처**: 추후 Raft 등 도입 가능
+- [x] **확장 가능 아키텍처**: Phase 2에서 gRPC/TCP 마이그레이션
 
 ### 📖 예상 시나리오
 1. **로그 수집**: 애플리케이션 로그 → 중앙 저장소 전달
@@ -61,11 +61,12 @@
 ```mermaid
 flowchart TD
     Producer["Producer(CLI or SDK)"] --> Broker1["Broker-1(Leader)"]
-    Broker1 --> WAL1["WAL File"] & Broker2["Broker-2(Follower)"]
-    Broker2 --> WAL2["WAL File"]
+    Broker1 --> WAL1[(WAL File)]
+    Broker1 --> Broker2["Broker-2(Follower)"]
+    Broker2 --> WAL2[(WAL File)]
     Consumer1["Consumer-1(Group-A)"] --> Broker1
     Consumer2["Consumer-2(Group-B)"] --> Broker1
-    Admin["Admin CLI"] --> Broker1
+    Admin[Admin CLI] --> Broker1
 ```
 
 ### 🧩 주요 컴포넌트와 책임
@@ -74,8 +75,8 @@ flowchart TD
 |---------|------|------|
 | **Producer** | 메시지 전송, 파티셔닝 | key 기반 라우팅 (hash(key) % N) |
 | **Broker** | 메시지 수신/저장/서빙 | WAL 기반 영속성, Consumer 요청 응답 |
-| **Consumer** | 메시지 Pull, 오프셋 관리 | Long Polling, 컨슈머 그룹 지원. MVP에서는 `offset` 파라미터를 통해 소비 시작 위치를 명시하거나, 브로커에 저장된 (인메모리) 오프셋을 사용. |
-| **Coordinator (MVP 단순화)** | Consumer Group 및 할당 상태 유지 | 인메모리 구현으로 브로커 재시작 시 오프셋 정보 유실 가능. Heartbeat로 리밸런싱 감지. |
+| **Consumer** | 메시지 Pull, 오프셋 관리 | Long Polling, 컨슈머 그룹 지원 |
+| **Coordinator (MVP 단순화)** | Consumer Group 및 할당 상태 유지 | 인메모리 구현, Heartbeat로 리밸런싱 감지 |
 | **WAL** | 메시지 복구용 로그 | offset, checksum 포함 |
 | **Replication** | 리더→팔로워 비동기 복제 | 리더 기준 최신 메시지 전달 |
 
@@ -129,14 +130,21 @@ type Partition struct {
 | 항목 | 기술 | 이유 |
 |------|------|------|
 | **언어** | Go 1.22 | 빠른 동시성 처리, 간단한 배포 |
-| **통신** | HTTP + JSON | 테스트 및 디버깅 용이 |
+| **통신** | HTTP + JSON | 개발 편의성 우선 (성능 제약 인지) |
 | **저장** | In-memory + WAL 파일 | 영속성과 성능 간 균형 |
 | **CLI** | Cobra | 커맨드 라인 도구 개발 |
 | **테스트** | `go test` | TDD 기반 개발 |
 | **성능 측정** | wrk, custom tool | Throughput, P95 측정 |
 | **로깅** | logrus | 단계별 로깅 처리 |
 
+### 알려진 성능 제약사항
+
+| 제약 요소 | 영향 | 완화 방안 |
+|---------|------|----------|
+| **HTTP/JSON 오버헤드** | JSON 파싱으로 인한 처리량 제한 (5K msg/s) | 배칭으로 완화, Phase 2에서 gRPC 마이그레이션 |
+
 ### 시스템 제한사항
+| **인메모리 저장소** | 파티션당 1M 메시지 제한 | WAL 기반 재시작 시 복구, 향후 세그먼트 분할 |
 
 | 제한 항목 | 최대값 | 이유 |
 |---------|-------|------|
@@ -180,8 +188,11 @@ curl -X POST http://localhost:9001/api/v1/produce \
   -H "Content-Type: application/json" \
   -d '{"topic":"test-topic","key":"user123","value":"Hello World"}'
 
-# 메시지 소비 (Consumer Group 자동 할당)
-curl "http://localhost:9001/api/v1/consume?topic=test-topic&offset=0&count=10&consumer_id=consumer-1&group_id=test-group&timeout=30s"
+# 메시지 소비 (Consumer Group 기반 - 브로커가 offset 관리)
+curl "http://localhost:9001/api/v1/consume?topic=test-topic&count=10&consumer_id=consumer-1&group_id=test-group&timeout=30s"
+
+# 메시지 소비 (개별 Consumer - 직접 offset 지정)
+curl "http://localhost:9001/api/v1/consume?topic=test-topic&partition=0&offset=100&count=10&timeout=30s"
 
 # Consumer Group 상태 확인
 curl "http://localhost:9001/api/v1/consumer-groups/test-group/status"
@@ -198,8 +209,8 @@ curl -X POST "http://localhost:9001/api/v1/consumer-groups/test-group/members/co
 
 | 테스트 항목 | 도구 | 목표 | 검증 방법 |
 |----------|-----|------|----------|
-| **처리량 측정** | wrk + Lua | ≥10K msg/s | 1KB 메시지로 30초 부하 |
-| **지연시간 측정** | Go client | P95 ≤ 100ms | produce → consume 측정 |
+| **처리량 측정** | wrk + Lua | ≥5K msg/s | 1KB 메시지로 30초 부하 |
+| **지연시간 측정** | Go client | P95 ≤ 200ms | produce → consume 측정 |
 | **장애 복구** | 수동 | ≤30초 | 브로커 kill 후 복원 |
 | **배치 효과** | wrk | TPS 비교 | 배치 vs 단건 전송 비교 |
 
@@ -226,7 +237,7 @@ function response(status, headers, body)
 end
 
 function done(summary, latency, requests)
-    print("Throughput: " .. (requests.n / (requests.duration / 1000000)) .. " requests/sec")
+    print("Throughput: " .. (requests.duration / 1000000) .. " requests/sec")
     print("Average latency: " .. latency.mean / 1000 .. "ms")
 end
 ```
@@ -267,6 +278,8 @@ Red → Green → Refactor 사이클 반복
 | **WAL 손상 시 복구는 어떻게 되나요?** | CRC32 기반 손상 검증, 복구 실패 시 fail-safe 처리 필요 |
 | **메시지 중복 방지는?** | at-least-once만 보장. 중복 방지는 Consumer에서 처리 필요 |
 | **Consumer Group에서 동시성 문제는 어떻게 해결하나요?** | Heartbeat + 파티션 할당으로 한 파티션은 한 Consumer만 소비. 409 Conflict로 중복 방지 |
+| **HTTP + JSON 성능 한계는 어떻게 해결하나요?** | MVP에서는 개발 편의성 우선. 5K msg/s 목표로 현실적 설정. Phase 2에서 gRPC로 마이그레이션 |
+| **Zero-copy 최적화는 HTTP에서 가능한가요?** | HTTP 스택에서는 불가능. Phase 2에서 TCP 기반 커스텀 프로토콜로 전환해야 구현 가능 |
 
 ---
 
@@ -278,7 +291,7 @@ Red → Green → Refactor 사이클 반복
 | **2주차<br/>(8/4-8/10)** | 파티션 로직, WAL 기본 구현 | WAL 읽기/쓰기 테스트 | 파일 영속화 동작 확인 |
 | **3주차<br/>(8/11-8/17)** | HTTP API, 프로듀서 구현 | HTTP 핸들러 테스트 | 1K msg/s 처리 확인 |
 | **4주차<br/>(8/18-8/24)** | 컨슈머, 오프셋 관리 | 컨슈머 그룹 테스트 | E2E 메시지 플로우 동작 |
-| **5주차<br/>(8/25-8/31)** | 배칭, 성능 최적화 | 배칭 로직 테스트 | 10K msg/s 목표 달성 |
+| **5주차<br/>(8/25-8/31)** | 배칭, 성능 최적화 | 배칭 로직 테스트 | 5K msg/s 목표 달성 |
 | **6주차<br/>(9/1-9/7)** | Consumer Group, 파티션 할당 | 리밸런싱 테스트 | Consumer 추가/삭제 시 자동 재할당 |
 | **7주차<br/>(9/8-9/14)** | 복제 기능, 장애 복구 | 복제 동기화 테스트 | 데이터 일관성 확인, 30초 내 복구 |
 | **8주차<br/>(9/15-9/21)** | 성능 테스트, 버그 수정 | 부하 테스트 자동화 | 모든 성능 목표 달성 |
@@ -363,13 +376,21 @@ gafka/
 - [x] 단일 브로커 WAL 저장소
 - [x] HTTP API 기반 통신
 
-### Phase 2 - 분산 시스템 확장
-- [ ] 리더 자동 선출 (Raft 등)
+### Phase 2 - 성능 최적화 및 프로토콜 마이그레이션
+- [ ] gRPC 기반 통신으로 마이그레이션
+- [ ] TCP 커스텀 프로토콜 (Zero-copy 지원)
+- [ ] 메시지 압축 (gzip, snappy)
 - [ ] Consumer Group 오프셋 영속화
-- [ ] 메시지 압축 (gzip)
-- [ ] Zero-copy 전송 최적화
 
-### Phase 3 - 운영 기능
+### Phase 3 - 분산 시스템 확장
+- [ ] 리더 자동 선출 (Raft 등)
+- [ ] 크로스 데이터센터 복제
+- [ ] 파티션 자동 분할
+### Phase 4 - 운영 기능
+- [ ] Prometheus 기반 모니터링
+- [ ] TLS, 인증 등 보안 기능
+- [ ] Docker 컨테이너 배포
+- [ ] Kubernetes 매니페스트
 - [ ] Prometheus 기반 모니터링
 - [ ] TLS, 인증 등 보안 기능
 - [ ] Docker 컨테이너 배포
@@ -380,9 +401,9 @@ gafka/
 ## ✅ 성공 기준
 
 ### 기능적 기준
-- [x] **메시지 처리량**: 단일 브로커 10K msg/s 이상 (1KB 메시지 기준)
+- [x] **메시지 처리량**: 단일 브로커 5K msg/s 이상 (1KB 메시지, HTTP/JSON 기준)
 - [x] **메시지 순서 보장**: 파티션 내 100% 순서 유지
-- [x] **데이터 영속성**: 브로커 재시작 후 WAL 기반 100% 복구
+- [x] **데이터 영속성**: 승인된 메시지 WAL 기반 100% 복구 보장
 - [x] **기본 복제**: 리더-팔로워 간 비동기 복제 정상 동작
 - [x] **Consumer Group**: 파티션별 단일 Consumer 보장
 
