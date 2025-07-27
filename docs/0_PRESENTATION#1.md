@@ -22,9 +22,8 @@ class: lead
 - 네트워크 이슈 시 **데이터 유실**
 
 ### 학습 목표
-- Kafka의 핵심 개념 실습
-- WAL, 배칭, 복제 등 분산 시스템 설계 감각 체득
-- 실시간 로그/이벤트 기반 처리 경험 축적
+- Go 기반으로 직접 구현하며 Kafka의 핵심 개념 실습 
+- WAL, 배치 처리, 컨슈머 그룹 등 핵심 컴포넌트 설계
 
 ---
 
@@ -45,9 +44,9 @@ class: lead
 ### 핵심 기능 요약
 - Producer ↔ Broker ↔ Consumer 구조
 - **WAL 기반 메시지 영속성**
-- **Long Polling 기반 Pull 모델**
-- **컨슈머 그룹** + 오프셋 기반 재처리
 - **리더-팔로워 복제 구조**
+- **컨슈머 그룹** + 오프셋 기반 재처리
+- **Long Polling 기반 Pull 모델**
 - **Key 기반 파티셔닝 (hash(key) % N)**
 
 ---
@@ -64,7 +63,6 @@ flowchart TD
     Consumer2["Consumer-2(Group-B)"] --> Broker1
     Admin[Admin CLI] --> Broker1
 ```
-
 
 > MVP 단계에서는 HTTP + JSON 통신 / 인메모리 코디네이터
 
@@ -95,17 +93,16 @@ type Message struct {
 ```
 
 - **WAL**: 로그 단위 저장, 장애 시 복구
-- **Checksum 포함**으로 무결성 보장
-- **세그먼트 기반 저장 구조** 도입 예정
+- **Checksum 무결성 보장**과 **세그먼트 기반 저장 구조** 도입 예정
 
 ---
 
 ## 👥 Consumer Group 및 리밸런싱
 
-- 그룹 내 한 파티션은 **한 Consumer만** 소비
-- **Heartbeat** 기반 생존 확인
-- Coordinator가 **리더 선출 → 파티션 재할당**
-- 리밸런싱은 **자동/동적**으로 수행됨
+- 컨슈머 그룹은 오프셋을 공유함
+- 하나의 파티션은 하나의 컨슈머에게만 할당됨
+- heartbeat 기반 생존 체크
+- 브로커 장애 시 자동 재할당 수행 예정 (현재는 MVP 수준)
 
 ---
 
@@ -151,24 +148,19 @@ type Message struct {
 - gRPC / TCP 커스텀 프로토콜
 - 메시지 압축 (gzip/snappy)
 - 리더 자동 선출 (Raft)
-- Prometheus 모니터링
-- 인증 및 TLS
-- 쿠버네티스 배포 / 오토스케일링
-- 멀티 데이터센터 복제
+- 메타데이터 영속화 (Zookeeper 또는 etcd)
 
 ---
 
 ## ✅ 요약
 
-- Kafka 핵심 아키텍처를 직접 설계/구현한 학습 프로젝트
-- Go의 동시성과 WAL, 배칭 등을 이용한 고성능 메시지 큐
-- **Throughput / Durability / Scalability**를 모두 고려
-- TDD, 문서화, 자동화 테스트 포함한 **실무 중심 설계**
+- Kafka의 핵심 개념을 바닥부터 구현한 실습형 프로젝트
+- Go 기반 분산 메시지 큐 설계와 성능 최적화 경험
+- 확장 가능한 구조와 실무 수준 테스트 전략 포함
 
 ---
 
 ## ❓ Q&A
 
 > 궁금한 점 물어보세요!  
-> 혹은 이 시스템을 실무에 적용한다면 어떤 문제가 생길까요?
 

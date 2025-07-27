@@ -93,7 +93,7 @@ flowchart TD
 | **Partition Assignment** | Round-Robin 방식 단순 구현 |
 | **Failover 대응** | heartbeat 누락 시 → 파티션 재할당 |
 
-### 데이터 모델링
+### 💠 데이터 모델링
 
 ```go
 // 메시지 구조
@@ -125,6 +125,25 @@ type Partition struct {
     mutex       sync.RWMutex      `json:"-"`        // 동시성 제어
 }
 ```
+
+### 🤿 Kafka와 차이
+
+#### 1. 시스템 구성
+
+|항목|gafka|Kafka|
+|---|---|---|
+|메시지 경로|Producer → Broker (Leader) → WAL → Consumer|유사|
+|복제 방식|리더 → 팔로워 비동기|ISR 기반 복제|
+|Offset 관리|In-memory + 일부 API 지원|Zookeeper or Kafka Internal|
+|통신 방식|HTTP + JSON|TCP + Binary Protocol|
+|메시지 전송 방식|Batching 지원|Batching + Compression + Zero-Copy|
+|장애 복구|WAL 기반 수동 복구|자동 리더 선출 + ISR 복제|
+
+#### 2. 설계 의사결정
+
+- **HTTP 기반 통신**: MVP 개발 속도를 위한 의도된 선택이지만, 성능 한계 존재
+- **Coordinator 단순화**: 외부 시스템 (e.g., Zookeeper) 제거 → 구조 단순화
+- **WAL 설계**: 단일 파일 기반 WAL로 최소 영속성 구현, 향후 세그먼트 관리 필요
 
 ---
 
@@ -284,6 +303,27 @@ Red → Green → Refactor 사이클 반복
 | **HTTP + JSON 성능 한계는 어떻게 해결하나요?** | MVP에서는 개발 편의성 우선. 5K msg/s 목표로 현실적 설정. Phase 2에서 gRPC로 마이그레이션 |
 | **Zero-copy 최적화는 HTTP에서 가능한가요?** | HTTP 스택에서는 불가능. Phase 2에서 TCP 기반 커스텀 프로토콜로 전환해야 구현 가능 |
 
+### 🏗 발전 가능한 베이스인지?
+
+✅ **충분히 발전 가능한 설계**
+- 모든 핵심 컴포넌트가 모듈화되어 있음 (`internal/broker`, `internal/consumer` 등)
+- 테스트 기반 개발 프로세스 탑재 (TDD + wrk)
+- 디버깅과 확장 모두 고려한 디렉토리 구조
+
+하지만 아래와 같은 요소는 **시스템 확장의 실질적 장애물**로 작용 가능
+
+### 🚫 실질적인 장애물
+1. **통신 계층 한계**
+    - HTTP + JSON → 5K msg/s 제한
+    - TCP 기반 커스텀 프로토콜 필요 (Zero-copy 등)
+2. **Coordinator 지속성 없음**
+    - 현재는 인메모리 기반 (Consumer Group, Offset 등 모두 휘발성)
+3. **복제/장애 복구 자동화 부족**
+    - 팔로워의 리더 전환 수동
+    - ISR, 리더 선출 알고리즘 부재
+4. **세그먼트 및 인덱싱 기능 부재**
+    - WAL은 하나의 긴 로그로만 존재 → 복구/압축/GC 어렵다
+
 ---
 
 ## 9. 🗓️ 개발 일정 (주차별)
@@ -379,22 +419,15 @@ gafka/
 - [x] 단일 브로커 WAL 저장소
 - [x] HTTP API 기반 통신
 
-### Phase 2 - 성능 최적화 및 프로토콜 마이그레이션
-- [ ] gRPC 기반 통신으로 마이그레이션
-- [ ] TCP 커스텀 프로토콜 (Zero-copy 지원)
-- [ ] 메시지 압축 (gzip, snappy)
-- [ ] Consumer Group 오프셋 영속화
+### Phase 2 - 성능 최적화
+- [ ] HTTP → gRPC or TCP 커스텀 프로토콜
+- [ ] WAL 세그먼트 구조 및 인덱싱 추가
+- [ ] 메시지 압축 (gzip/snappy)
 
 ### Phase 3 - 분산 시스템 확장
-- [ ] 리더 자동 선출 (Raft 등)
-- [ ] 크로스 데이터센터 복제
-- [ ] 파티션 자동 분할
-
-### Phase 4 - 운영 기능
-- [ ] Prometheus 기반 모니터링
-- [ ] TLS, 인증 등 보안 기능
-- [ ] Docker 컨테이너 배포
-- [ ] Kubernetes 매니페스트
+- [ ] Raft 기반 리더 선출
+- [ ] Offset 및 Metadata 영속화 (BoltDB/Badger 등 사용 가능)
+- [ ] 브로커 클러스터링 + ZooKeeper or etcd 연동
 
 ---
 
